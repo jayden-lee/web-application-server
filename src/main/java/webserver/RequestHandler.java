@@ -4,10 +4,12 @@ import model.User;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import util.HttpRequestUtils;
+import util.IOUtils;
 
 import java.io.*;
 import java.net.Socket;
 import java.nio.file.Files;
+import java.util.HashMap;
 import java.util.Map;
 
 public class RequestHandler extends Thread {
@@ -26,19 +28,23 @@ public class RequestHandler extends Thread {
         try (InputStream in = connection.getInputStream(); OutputStream out = connection.getOutputStream()) {
             BufferedReader br = new BufferedReader(new InputStreamReader(in, "UTF-8"));
             String line = br.readLine();
+            log.debug(line);
             if (line == null) {
                 return;
             }
 
-            log.debug(line);
-
             String[] tokens = line.split(" ");
-
             String url = tokens[1];
+
+            Map<String, String> headerMap = createHeaderMap(br);
+
             String requestPath = "/index.html";
+
             if (url.startsWith("/user/create")) {
-                int index = url.indexOf("?");
-                Map<String, String> params = HttpRequestUtils.parseQueryString(url.substring(index + 1));
+                String body = IOUtils.readData(br, Integer.parseInt(headerMap.get("Content-Length")));
+                log.debug("body: {}", body);
+
+                Map<String, String> params = HttpRequestUtils.parseQueryString(body);
                 User user = new User(params.get("userId"), params.get("password"), params.get("name"), params.get("email"));
                 log.debug("Create user: {}", user);
 
@@ -58,19 +64,17 @@ public class RequestHandler extends Thread {
         }
     }
 
-    private String requestHeader(InputStream in) {
-        BufferedReader br = new BufferedReader(new InputStreamReader(in));
+    private Map<String, String> createHeaderMap(BufferedReader br) throws IOException {
+        Map<String, String> headerMap = new HashMap<>();
+
         String line;
-        try {
-            do {
-                line = br.readLine();
-                String[] tokens = line.split(" ");
-                return tokens[1];
-            } while (!"".equals(line));
-        } catch (IOException e) {
-            log.error(e.getMessage(), e);
+
+        while (!"".equals(line = br.readLine())) {
+            String[] split = line.split(":", 2);
+            headerMap.put(split[0], split[1].trim());
         }
-        return "";
+
+        return headerMap;
     }
 
     private void response200Header(DataOutputStream dos, int lengthOfBodyContent) {
