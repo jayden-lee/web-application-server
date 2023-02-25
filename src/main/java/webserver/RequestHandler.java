@@ -9,7 +9,10 @@ import util.IOUtils;
 
 import java.io.*;
 import java.net.Socket;
+import java.net.URLDecoder;
+import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
+import java.util.Collection;
 import java.util.HashMap;
 import java.util.Map;
 
@@ -27,7 +30,7 @@ public class RequestHandler extends Thread {
                 connection.getPort());
 
         try (InputStream in = connection.getInputStream(); OutputStream out = connection.getOutputStream()) {
-            BufferedReader br = new BufferedReader(new InputStreamReader(in, "UTF-8"));
+            BufferedReader br = new BufferedReader(new InputStreamReader(in, StandardCharsets.UTF_8));
             String line = br.readLine();
             log.debug(line);
             if (line == null) {
@@ -46,7 +49,13 @@ public class RequestHandler extends Thread {
                 log.debug("body: {}", body);
 
                 Map<String, String> params = HttpRequestUtils.parseQueryString(body);
-                User user = new User(params.get("userId"), params.get("password"), params.get("name"), params.get("email"));
+                User user = new User(
+                    URLDecoder.decode(params.get("userId"), StandardCharsets.UTF_8.name()),
+                    URLDecoder.decode(params.get("password"), StandardCharsets.UTF_8.name()),
+                    URLDecoder.decode(params.get("name"), StandardCharsets.UTF_8.name()),
+                    URLDecoder.decode(params.get("email"), StandardCharsets.UTF_8.name())
+                );
+
                 log.debug("Create user: {}", user);
 
                 DataBase.addUser(user);
@@ -70,6 +79,32 @@ public class RequestHandler extends Thread {
                     responseResource(out, "/user/login_failed.html");
                 }
 
+            } else if ("/user/list".equals(url)) {
+                if (!isLogin(headerMap)) {
+                    responseResource(out, "/user/login.html");
+                    return;
+                }
+
+                Collection<User> users = DataBase.findAll();
+
+                StringBuilder userTableHtml = new StringBuilder();
+                userTableHtml.append("<table border='1'>");
+
+                for (User user : users) {
+                    userTableHtml.append("<tr>");
+                    userTableHtml.append("<td>").append(user.getUserId()).append("</td>");
+                    userTableHtml.append("<td>").append(user.getName()).append("</td>");
+                    userTableHtml.append("<td>").append(user.getEmail()).append("</td>");
+                    userTableHtml.append("</tr>");
+                }
+
+                userTableHtml.append("</table>");
+
+                byte[] body = userTableHtml.toString().getBytes();
+                DataOutputStream dos = new DataOutputStream(out);
+                response200Header(dos, body.length);
+                responseBody(dos, body);
+
             } else if (url.equals("/")) {
                 requestPath = "/index.html";
                 byte[] body = Files.readAllBytes(new File("./webapp" + requestPath).toPath());
@@ -84,6 +119,16 @@ public class RequestHandler extends Thread {
         } catch (IOException e) {
             log.error(e.getMessage());
         }
+    }
+
+    private boolean isLogin(Map<String, String> headerMap) {
+        Map<String, String> cookies = HttpRequestUtils.parseCookies(headerMap.getOrDefault("Cookie", ""));
+        String loginedValue = cookies.get("logined");
+        if (loginedValue == null) {
+            return false;
+        }
+
+        return Boolean.parseBoolean(loginedValue);
     }
 
     private Map<String, String> createHeaderMap(BufferedReader br) throws IOException {
